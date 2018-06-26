@@ -58,22 +58,47 @@
 Send INPUT-BUFFER content to the process stdin.  Saving the
 output to OUTPUT-BUFFER.  Saving process stderr to ERROR-BUFFER.
 Return black process the exit code."
+  ;; using the input buffer
   (with-current-buffer input-buffer
-    (let ((process (make-process :name "blacken"
-                                 :command `(,blacken-executable ,@(blacken-call-args))
-                                 :buffer output-buffer
-                                 :stderr error-buffer
-                                 :noquery t
-                                 :sentinel (lambda (process event)))))
+    ;; Assign the external process to process
+    (let ((process
+	   ;; run a program in a subprocess and return the process object
+	   (make-process :name "blacken"
+			 ;; The command to be run
+                         :command `(,blacken-executable ,@(blacken-call-args))
+			 ;; the output buffer
+                         :buffer output-buffer
+			 ;; pipe the standard error to the the error buffer
+                         :stderr error-buffer
+			 ;; don't stop the user if this is still running
+			 ;; when they try to kill emacs.
+                         :noquery t
+			 ;; this installs a callback which will execute whenever
+			 ;; the associated process changes status
+                         :sentinel (lambda (process event)))))
+      ;; don't ask emacs for query on exit from the process (duplicate?)
       (set-process-query-on-exit-flag (get-buffer-process error-buffer) nil)
-      (set-process-sentinel (get-buffer-process error-buffer) (lambda (process event)))
+      ;; set the sentinel as the process associated with error buffer (also duplicate?)
+      (set-process-sentinel (get-buffer-process error-buffer)
+			    (lambda (process event)))
+      ;; Aren't these previous 2 statements just doing what the 2 last kwargs
+      ;; from the makeprocess function are doing?
+      
+      ;; save the current buffers status then restore it when you're done
+      ;; executing BODY
       (save-restriction
+	;; if the buffer is narrowed then widen it
         (widen)
+	;; Send the entire buffer to the process
         (process-send-region process (point-min) (point-max)))
+      ;; indicate to the process that it has received all required input
       (process-send-eof process)
+      ;; pipe the output from the process into emacs
       (accept-process-output process nil nil t)
+      ;; While the process hasn't yet exited, accept input from it
       (while (process-live-p process)
         (accept-process-output process nil nil t))
+      ;; return the exit status of process
       (process-exit-status process))))
 
 (defun blacken-call-args ()
@@ -85,7 +110,7 @@ Return black process the exit code."
 
 ;;;###autoload
 (defun blacken-buffer (&optional display)
-  "Try to blacken the current buffer.
+  "Try to blacken the current REGION if not nil else blacken the whole buffer.
 
 Show black output, if black exit abnormally and DISPLAY is t."
   (interactive (list t))
@@ -125,9 +150,10 @@ Show black output, if black exit abnormally and DISPLAY is t."
   (let*
       ;; Set the 'original-buffer' variable to refer to the current buffer
       ((original-buffer (current-buffer))
-       ;; Set teh 'original-point' variable to refer to the current point
+       ;; Set the 'original-point' variable to refer to the current point
        (original-point (point))
-       ;; set the 'original-window-position' variable to refer to the start of the current window
+       ;; set the 'original-window-position' variable to refer to the start of the
+       ;; current window
        (original-window-pos (window-start))
        ;; create a temporary buffer called 'blacken'
        (tmpbuf (get-buffer-create "*blacken*"))
@@ -136,11 +162,22 @@ Show black output, if black exit abnormally and DISPLAY is t."
     ;; This buffer can be left after previous black invocation.  It
     ;; can contain error message of the previous run.
 
-    (dolist (buf (list tmpbuf errbuf))
+    ;; loop over the given list
+    (dolist
+	;; buf - the variable to which the car of the list of dolist is bound
+	(buf
+	 ;; create and return a list constructed of the subsequent elements
+	 (list tmpbuf errbuf))
+      ;; erase the contents of the blacken and blacken-error
       (with-current-buffer buf
         (erase-buffer)))
+    ;; error handling, kind of like a try-except
     (condition-case err
-        (if (not (zerop (blacken-call-bin original-buffer tmpbuf errbuf)))
+        (if (not
+	     ;; If the called function returns any non-zero value
+	     (zerop
+	      ;; call the blacken binary
+	      (blacken-call-bin original-buffer tmpbuf errbuf)))
             (error "Black failed, see %s buffer for details" (buffer-name errbuf))
           (unless (eq (compare-buffer-substrings tmpbuf nil nil original-buffer nil nil) 0)
             (with-current-buffer tmpbuf
