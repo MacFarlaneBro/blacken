@@ -112,6 +112,47 @@ Show black output, if black exit abnormally and DISPLAY is t."
              (when display
                (pop-to-buffer errbuf))))))
 
+
+;;;###autoload
+(defun blacken-region (&optional display)
+  "Try to blacken the current region.
+
+Show black output, if black exit abnormally and DISPLAY is t."
+  ;; pass a list in as an argument somehow
+  (interactive (list t))
+  ;; let* - nest each of the succeeding lets inside the previous, thus allowing
+  ;; use of an earlier variable inside the initialisation of a later one.
+  (let*
+      ;; Set the 'original-buffer' variable to refer to the current buffer
+      ((original-buffer (current-buffer))
+       ;; Set teh 'original-point' variable to refer to the current point
+       (original-point (point))
+       ;; set the 'original-window-position' variable to refer to the start of the current window
+       (original-window-pos (window-start))
+       ;; create a temporary buffer called 'blacken'
+       (tmpbuf (get-buffer-create "*blacken*"))
+       ;; create a temporary buffer called blacken error
+       (errbuf (get-buffer-create "*blacken-error*")))
+    ;; This buffer can be left after previous black invocation.  It
+    ;; can contain error message of the previous run.
+
+    (dolist (buf (list tmpbuf errbuf))
+      (with-current-buffer buf
+        (erase-buffer)))
+    (condition-case err
+        (if (not (zerop (blacken-call-bin original-buffer tmpbuf errbuf)))
+            (error "Black failed, see %s buffer for details" (buffer-name errbuf))
+          (unless (eq (compare-buffer-substrings tmpbuf nil nil original-buffer nil nil) 0)
+            (with-current-buffer tmpbuf
+              (copy-to-buffer original-buffer (point-min) (point-max))))
+          (mapc 'kill-buffer (list tmpbuf errbuf))
+          (goto-char original-point)
+          (set-window-start (selected-window) original-window-pos))
+      (error (message "%s" (error-message-string err))
+             (when display
+               (pop-to-buffer errbuf))))))
+
+
 ;;;###autoload
 (define-minor-mode blacken-mode
   "Automatically run black before saving."
