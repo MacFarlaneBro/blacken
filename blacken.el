@@ -52,11 +52,12 @@
   :type 'number
   :safe 'numberp)
 
-(defun blacken-call-bin (input-buffer output-buffer error-buffer)
+(defun blacken-call-bin (input-buffer output-buffer error-buffer region)
   "Call process black.
 
 Send INPUT-BUFFER content to the process stdin.  Saving the
 output to OUTPUT-BUFFER.  Saving process stderr to ERROR-BUFFER.
+if REGION is not nil then only apply blackening to region.
 Return black process the exit code."
   ;; using the input buffer
   (with-current-buffer input-buffer
@@ -88,7 +89,9 @@ Return black process the exit code."
       ;; executing BODY
       (save-restriction
 	;; if the buffer is narrowed then widen it
-        (widen)
+	(if region
+	    (narrow-to-region (point) (mark))
+          (widen))
 	;; Send the entire buffer to the process
         (process-send-region process (point-min) (point-max)))
       ;; indicate to the process that it has received all required input
@@ -98,6 +101,8 @@ Return black process the exit code."
       ;; While the process hasn't yet exited, accept input from it
       (while (process-live-p process)
         (accept-process-output process nil nil t))
+      ;; Once the process has finished, rewiden it if narrowed
+      (widen)
       ;; return the exit status of process
       (process-exit-status process))))
 
@@ -114,6 +119,26 @@ Return black process the exit code."
 
 Show black output, if black exit abnormally and DISPLAY is t."
   (interactive (list t))
+  ;; if display is not defined set it to nil
+  (let ((display (or display nil)))
+    (blacken-core display nil)))
+
+;;;###autoload
+(defun blacken-region (&optional display)
+  "Try to blacken the current region.
+
+Show black output, if black exit abnormally and DISPLAY is t."
+  ;; pass a list in as an argument somehow
+  (interactive (list t))
+  (let ((display (or display nil)))
+    (blacken-core display t)))
+
+
+(defun blacken-core (&optional display region)
+  "The core functionality of the various blacken commands.
+
+Show black output, if black exit abnormally and DISPLAY is t.
+Only blacken the current REGION if defined."
   (let* ((original-buffer (current-buffer))
          (original-point (point))
          (original-window-pos (window-start))
@@ -125,7 +150,7 @@ Show black output, if black exit abnormally and DISPLAY is t."
       (with-current-buffer buf
         (erase-buffer)))
     (condition-case err
-        (if (not (zerop (blacken-call-bin original-buffer tmpbuf errbuf)))
+        (if (not (zerop (blacken-call-bin original-buffer tmpbuf errbuf region)))
             (error "Black failed, see %s buffer for details" (buffer-name errbuf))
           (unless (eq (compare-buffer-substrings tmpbuf nil nil original-buffer nil nil) 0)
             (with-current-buffer tmpbuf
@@ -139,14 +164,17 @@ Show black output, if black exit abnormally and DISPLAY is t."
 
 
 ;;;###autoload
-(defun blacken-region (&optional display)
-  "Try to blacken the current region.
+(define-minor-mode blacken-mode
+  "Automatically run black before saving."
+  :lighter " Black"
+  (if blacken-mode
+      (add-hook 'before-save-hook 'blacken-buffer nil t)
+    (remove-hook 'before-save-hook 'blacken-buffer t)))
 
-Show black output, if black exit abnormally and DISPLAY is t."
-  ;; pass a list in as an argument somehow
-  (interactive (list t))
-  ;; let* - nest each of the succeeding lets inside the previous, thus allowing
-  ;; use of an earlier variable inside the initialisation of a later one.
+(provide 'blacken)
+
+(defun blacken-core-annotated ()
+  "An annotated form of the core blacken function."
   (let*
       ;; Set the 'original-buffer' variable to refer to the current buffer
       ((original-buffer (current-buffer))
@@ -188,16 +216,5 @@ Show black output, if black exit abnormally and DISPLAY is t."
       (error (message "%s" (error-message-string err))
              (when display
                (pop-to-buffer errbuf))))))
-
-
-;;;###autoload
-(define-minor-mode blacken-mode
-  "Automatically run black before saving."
-  :lighter " Black"
-  (if blacken-mode
-      (add-hook 'before-save-hook 'blacken-buffer nil t)
-    (remove-hook 'before-save-hook 'blacken-buffer t)))
-
-(provide 'blacken)
 
 ;;; blacken.el ends here
